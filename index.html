@@ -132,7 +132,8 @@ main.wrap.only-customer { grid-template-columns: minmax(0, 1fr); max-width: 460p
 .done-row button { background: none; border: 0; color: var(--muted); text-decoration: underline; font-size: 12.5px; }
 
 /* pager (customer) */
-.pager { background: var(--panel); border: 1px solid var(--line); border-radius: 26px; padding: 18px; display: grid; gap: 14px; min-width: 0; }
+.pager { background: var(--panel); border: 1px solid var(--line); border-radius: 26px; padding: 18px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; min-width: 0; }
+.sound-banner > span { min-width: 0; }
 .pager-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
 .pager-top span { font-size: 13px; color: var(--muted); font-weight: 600; }
 .sound-banner { display: flex; align-items: center; justify-content: space-between; gap: 10px; background: var(--amber-soft); border: 1px solid rgba(245,166,35,.35); border-radius: 12px; padding: 10px 12px; font-size: 13px; }
@@ -165,6 +166,19 @@ main.wrap.only-customer { grid-template-columns: minmax(0, 1fr); max-width: 460p
 
 .btn-received { width: 100%; padding: 16px; font-size: 18px; font-weight: 800; border-radius: 14px; background: var(--fg); color: var(--bg); border: 0; }
 .pager-foot { font-size: 11.5px; color: var(--faint); text-align: center; margin: 0; }
+.cust-new { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; min-width: 0; background: var(--bg); border: 1px solid var(--line); border-radius: 14px; padding: 12px; }
+.cust-new.prominent { border-color: rgba(245,166,35,.45); background: var(--amber-soft); }
+.cust-new label { font-size: 13px; color: var(--muted); font-weight: 600; }
+.cust-new.prominent label { color: var(--amber); font-size: 14.5px; }
+.cust-row { display: flex; gap: 8px; }
+.cust-row input { flex: 1 1 0; width: 0; min-width: 0; background: var(--raised); border: 1px solid var(--line); color: var(--fg); border-radius: 10px; padding: 10px 12px; font-size: 20px; text-align: center; }
+.cust-new .btn-ghost { width: 100%; display: flex; align-items: center; justify-content: center; gap: 8px; }
+.cust-new .btn-ghost svg { width: 18px; height: 18px; }
+.scan-box { position: fixed; inset: 0; z-index: 50; background: rgba(0,0,0,.92); display: grid; place-items: center; align-content: center; gap: 16px; padding: max(16px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) max(16px, env(safe-area-inset-bottom, 0px)) max(16px, env(safe-area-inset-left, 0px)); }
+.scan-box[hidden] { display: none !important; }
+.scan-frame { position: relative; width: min(80vw, 340px); aspect-ratio: 1; max-width: 100%; border-radius: 18px; overflow: hidden; border: 3px solid var(--amber); }
+.scan-frame video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.scan-box p { margin: 0; color: #fff; font-size: 14px; text-align: center; max-width: 30ch; }
 
 @media (prefers-reduced-motion: reduce) {
   .ring .arc, .bell, .status.is-ready { animation: none; }
@@ -250,11 +264,25 @@ main.wrap.only-customer { grid-template-columns: minmax(0, 1fr); max-width: 460p
     </div>
 
     <button class="btn-received" type="button" id="received" hidden>استلمت طلبي، أوقف الجرس</button>
+    <form class="cust-new" id="cust-new" hidden autocomplete="off">
+      <label for="cust-no" id="cust-label">عندك طلب جديد؟ اكتب رقمه أو امسح الرمز</label>
+      <div class="cust-row">
+        <input id="cust-no" class="num" inputmode="numeric" maxlength="8" placeholder="رقم الطلب" aria-describedby="cust-msg">
+        <button class="btn btn-amber" type="submit">متابعة</button>
+      </div>
+      <button class="btn btn-ghost" type="button" id="scan-btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M7 12h10"/></svg>مسح رمز QR بالكاميرا</button>
+      <p class="form-msg" id="cust-msg" role="status"></p>
+    </form>
     <p class="pager-foot" id="pager-foot">بعد تفعيل التنبيهات تقدر تطلع من المتصفح أو تقفل الشاشة، وبيوصلك إشعار لما يجهز طلبك.</p>
   </section>
 </main>
 
 
+<div class="scan-box" id="scan-box" hidden>
+  <div class="scan-frame"><video id="scan-video" playsinline muted></video></div>
+  <p id="scan-text">وجّه الكاميرا على رمز QR اللي عند الكاشير</p>
+  <button class="btn btn-ghost" type="button" id="scan-close">إلغاء</button>
+</div>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 <script>
 (function () {
@@ -275,8 +303,26 @@ main.wrap.only-customer { grid-template-columns: minmax(0, 1fr); max-width: 460p
 
   // ---------- route ----------
   const q = new URLSearchParams(location.search);
-  const customerOnly = q.has("o") && q.has("r");
-  let restaurant = q.get("r") || store.get("pager-restaurant");
+  const inApp = (window.matchMedia && matchMedia("(display-mode: standalone)").matches) || navigator.standalone === true;
+  const okR = (r) => typeof r === "string" && /^[a-z0-9]{6,32}$/.test(r);
+  const okO = (o) => typeof o === "string" && /^[A-Za-z0-9]{1,8}$/.test(o);
+  let cur = null;
+  try { cur = JSON.parse(store.get("pager-cur") || "null"); } catch (e) { cur = null; }
+  if (!cur || !okR(cur.r) || !(cur.o === null || okO(cur.o))) cur = null;
+  const urlR = okR(q.get("r")) ? q.get("r") : null;
+  const urlO = okO(q.get("o")) ? q.get("o") : null;
+  // The installed app keeps launching the link it was installed from, so it
+  // follows the last order the customer chose instead of the URL.
+  let custR = null, custO = null;
+  if (inApp && cur) { custR = cur.r; custO = cur.o; }
+  else if (urlR && urlO) { custR = urlR; custO = urlO; }
+  else if (inApp && urlR) { custR = urlR; }
+  const customerOnly = !!custR;
+  if (customerOnly) {
+    store.set("pager-cur", JSON.stringify({ r: custR, o: custO }));
+    if (custO && (urlO !== custO || urlR !== custR)) { try { history.replaceState(null, "", location.pathname + "?r=" + custR + "&o=" + custO); } catch (e) {} }
+  }
+  let restaurant = custR || store.get("pager-restaurant");
   if (!restaurant || !/^[a-z0-9]{6,32}$/.test(restaurant)) {
     restaurant = Array.from(crypto.getRandomValues(new Uint8Array(8)), b => (b % 36).toString(36)).join("");
   }
@@ -288,7 +334,7 @@ main.wrap.only-customer { grid-template-columns: minmax(0, 1fr); max-width: 460p
 
   let mode = customerOnly ? "customer" : "split";
   let orders = [];
-  let selectedNo = customerOnly ? q.get("o").slice(0, 8) : null;
+  let selectedNo = customerOnly ? custO : null;
   let live = false;
 
   const fmtTime = (ms) => { try { return new Date(ms).toLocaleTimeString("ar-SA", { hour: "numeric", minute: "2-digit" }); } catch (e) { return ""; } };
@@ -486,7 +532,7 @@ main.wrap.only-customer { grid-template-columns: minmax(0, 1fr); max-width: 460p
     const reg = swReg || await navigator.serviceWorker.ready;
     let sub = await reg.pushManager.getSubscription();
     if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToBytes(VAPID_PUBLIC_KEY) });
-    await publish({ type: "sub", no: selectedNo, sub: sub.toJSON() });
+    if (selectedNo) await publish({ type: "sub", no: selectedNo, sub: sub.toJSON() });
     try { localStorage.setItem("pager-push-" + restaurant + "-" + selectedNo, "1"); } catch (e) {}
     return "ok";
   }
@@ -494,7 +540,7 @@ main.wrap.only-customer { grid-template-columns: minmax(0, 1fr); max-width: 460p
   if (customerOnly && "serviceWorker" in navigator && "Notification" in window && Notification.permission === "granted") {
     navigator.serviceWorker.ready.then(r => r.pushManager.getSubscription()).then(sub => {
       if (sub) {
-        publish({ type: "sub", no: selectedNo, sub: sub.toJSON() }).catch(() => {});
+        if (selectedNo) publish({ type: "sub", no: selectedNo, sub: sub.toJSON() }).catch(() => {});
         $("sound-banner").classList.add("on");
         $("sound-text").textContent = "التنبيهات مفعّلة. بيوصلك إشعار حتى لو طلعت من المتصفح.";
         $("enable-sound").textContent = "تفعيل صوت الصفحة";
@@ -504,6 +550,75 @@ main.wrap.only-customer { grid-template-columns: minmax(0, 1fr); max-width: 460p
   if (customerOnly && isIOS && !isStandalone) {
     $("sound-text").textContent = "للآيفون: اضغط زر المشاركة ثم «إضافة إلى الشاشة الرئيسية»، وافتح البيجر من الأيقونة وفعّل التنبيهات.";
   }
+
+  // ---------- new order from inside the app ----------
+  function goToOrder(r, o) {
+    store.set("pager-cur", JSON.stringify({ r, o }));
+    location.replace(location.pathname + "?r=" + r + "&o=" + encodeURIComponent(o));
+  }
+  if (customerOnly) {
+    $("cust-new").hidden = false;
+    if (!selectedNo) {
+      $("cust-new").classList.add("prominent");
+      $("cust-label").textContent = "اكتب رقم طلبك، أو امسح رمز QR اللي عند الكاشير";
+    }
+  }
+  $("cust-new").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const o = toEnDigits($("cust-no").value.trim());
+    if (!okO(o)) { $("cust-msg").textContent = "اكتب رقم الطلب بأرقام أو حروف إنجليزية فقط، حتى 8 خانات."; return; }
+    if (o === selectedNo) { $("cust-msg").textContent = "هذا هو طلبك الحالي."; return; }
+    goToOrder(custR, o);
+  });
+
+  let scanStream = null, scanTimer = null;
+  function loadJsQR() {
+    return new Promise((resolve, reject) => {
+      if (window.jsQR) return resolve(window.jsQR);
+      const s = document.createElement("script");
+      s.src = "https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js";
+      s.onload = () => window.jsQR ? resolve(window.jsQR) : reject(new Error("jsQR"));
+      s.onerror = reject;
+      document.head.appendChild(s);
+    });
+  }
+  function stopScan() {
+    clearInterval(scanTimer); scanTimer = null;
+    if (scanStream) { scanStream.getTracks().forEach(t => t.stop()); scanStream = null; }
+    $("scan-box").hidden = true;
+  }
+  $("scan-close").addEventListener("click", stopScan);
+  $("scan-btn").addEventListener("click", async () => {
+    $("cust-msg").textContent = "";
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) { $("cust-msg").textContent = "الكاميرا ما تشتغل هنا. اكتب رقم الطلب بدلاً منها."; return; }
+    $("scan-text").textContent = "وجّه الكاميرا على رمز QR اللي عند الكاشير";
+    $("scan-box").hidden = false;
+    let decode;
+    try {
+      [decode, scanStream] = await Promise.all([loadJsQR(), navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" }, audio: false })]);
+    } catch (e) {
+      stopScan();
+      $("cust-msg").textContent = "ما قدرنا نفتح الكاميرا. اسمح للتطبيق باستخدامها، أو اكتب رقم الطلب.";
+      return;
+    }
+    const v = $("scan-video");
+    v.srcObject = scanStream;
+    try { await v.play(); } catch (e) {}
+    const c = document.createElement("canvas"), ctx = c.getContext("2d", { willReadFrequently: true });
+    scanTimer = setInterval(() => {
+      if (!v.videoWidth) return;
+      const w = 480, hh = Math.round(480 * v.videoHeight / v.videoWidth);
+      c.width = w; c.height = hh;
+      ctx.drawImage(v, 0, 0, w, hh);
+      const img = ctx.getImageData(0, 0, w, hh);
+      const res = decode(img.data, w, hh, { inversionAttempts: "dontInvert" });
+      if (!res || !res.data) return;
+      let r = null, o = null;
+      try { const u = new URL(res.data, location.href); r = u.searchParams.get("r"); o = u.searchParams.get("o"); } catch (e) {}
+      if (okR(r) && okO(o)) { stopScan(); goToOrder(r, o); }
+      else { $("scan-text").textContent = "هذا الرمز مو رمز طلب. امسح الرمز اللي يعطيك إياه الكاشير."; }
+    }, 250);
+  });
 
   // ---------- customer pager ----------
   let audioCtx = null, alarmTimer = null, wakeLock = null, soundOn = false;
@@ -515,7 +630,7 @@ main.wrap.only-customer { grid-template-columns: minmax(0, 1fr); max-width: 460p
     requestWake();
     $("enable-sound").disabled = true;
     let res = "unsupported";
-    try { res = selectedNo ? await enablePush() : "unsupported"; } catch (e) { res = "error"; }
+    try { res = await enablePush(); } catch (e) { res = "error"; }
     $("enable-sound").disabled = false;
     const msgs = {
       "ok": "التنبيهات مفعّلة. بيوصلك إشعار بصوت واهتزاز حتى لو طلعت من المتصفح.",
@@ -584,13 +699,14 @@ main.wrap.only-customer { grid-template-columns: minmax(0, 1fr); max-width: 460p
     $("status-no").textContent = selectedNo ? "#" + selectedNo : "—";
     let status = o ? o.status : (selectedNo ? "missing" : "none");
     if (status === "ready" && silenced[selectedNo]) status = "done";
-    s.className = "status" + (status === "ready" ? " is-ready" : status === "done" ? " is-done" : (status === "missing" || status === "none") ? " is-missing" : "");
+    s.className = "status" + (status === "ready" ? " is-ready" : status === "done" ? " is-done" : (status === "none" || (status === "missing" && !customerOnly)) ? " is-missing" : "");
     $("received").hidden = status !== "ready";
     const set = (ic, st, hint) => { icon.innerHTML = ic; $("status-state").textContent = st; $("status-hint").textContent = hint; };
     if (status === "preparing") set(ICON_WAIT, "جاري تحضير طلبك", "خلّك قريب. بيرن الجوال ويومض أول ما يجهز.");
     else if (status === "ready") set(ICON_BELL, "طلبك جاهز!", "تفضّل للكاونتر واستلم طلبك.");
     else if (status === "done") set(ICON_CHECK, "تم الاستلام", "بالعافية! تقدر تقفل الصفحة.");
     else if (status === "missing") set(customerOnly ? ICON_WAIT : "", customerOnly ? "جاري تحضير طلبك" : "ما لقينا هذا الطلب", customerOnly ? "خلّك قريب. بيرن الجوال ويومض أول ما يجهز." : "تأكد من الرقم.");
+    else if (customerOnly) set("", "بانتظار رقم طلبك", "اكتب رقم طلبك تحت أو امسح الرمز، وبنبلغك أول ما يجهز.");
     else set("", "ما فيه طلب", "أنشئ طلب من لوحة الكاشير عشان تشوف البيجر هنا.");
     const prev = lastStatus[selectedNo];
     if (o) lastStatus[selectedNo] = o.status;
