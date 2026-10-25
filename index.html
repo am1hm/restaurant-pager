@@ -5,6 +5,13 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <meta name="theme-color" content="#12151b">
 <title>بيجر المطعم الرقمي</title>
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="icon" href="/icon-192.png">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="البيجر">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Cairo:wght@600;800;900&family=IBM+Plex+Sans+Arabic:wght@400;500;600&family=JetBrains+Mono:wght@600;800&display=swap">
 <style>
@@ -230,8 +237,8 @@ main.wrap.only-customer { grid-template-columns: minmax(0, 1fr); max-width: 460p
     </div>
 
     <div class="sound-banner" id="sound-banner">
-      <span id="sound-text">فعّل الصوت عشان يرن جوالك لما يجهز طلبك</span>
-      <button class="btn btn-amber" type="button" id="enable-sound">تفعيل الصوت</button>
+      <span id="sound-text">فعّل التنبيهات عشان يرن جوالك لما يجهز طلبك، حتى لو طلعت من المتصفح</span>
+      <button class="btn btn-amber" type="button" id="enable-sound">تفعيل التنبيهات</button>
     </div>
 
     <div class="status" id="status" aria-live="assertive">
@@ -243,7 +250,7 @@ main.wrap.only-customer { grid-template-columns: minmax(0, 1fr); max-width: 460p
     </div>
 
     <button class="btn-received" type="button" id="received" hidden>استلمت طلبي، أوقف الجرس</button>
-    <p class="pager-foot" id="pager-foot">خلّ الصفحة مفتوحة. الشاشة تبقى شغالة ما دامت الصفحة ظاهرة.</p>
+    <p class="pager-foot" id="pager-foot">بعد تفعيل التنبيهات تقدر تطلع من المتصفح أو تقفل الشاشة، وبيوصلك إشعار لما يجهز طلبك.</p>
   </section>
 </main>
 
@@ -275,6 +282,9 @@ main.wrap.only-customer { grid-template-columns: minmax(0, 1fr); max-width: 460p
   }
   if (!customerOnly) store.set("pager-restaurant", restaurant);
   const TOPIC = "dpager-" + restaurant;
+  const VAPID_PUBLIC_KEY = "BAdP2nXmySk_D7ZfD0iuQGaiXu8pkYBT7nMT3QywzIVaJ3-02MbIUepwLiEY6Ovu3uBvRv9o2T0UGhAY6viPbtk";
+  const subs = {}; // order no -> [PushSubscriptionJSON]
+  const pushed = {}; // order no -> true once push sent for its current "ready"
 
   let mode = customerOnly ? "customer" : "split";
   let orders = [];
@@ -308,6 +318,13 @@ main.wrap.only-customer { grid-template-columns: minmax(0, 1fr); max-width: 460p
   // ---------- sync ----------
   function apply(ev) {
     if (!ev || typeof ev.no !== "string") return;
+    if (ev.type === "sub") {
+      if (ev.sub && typeof ev.sub.endpoint === "string") {
+        const list = subs[ev.no] || (subs[ev.no] = []);
+        if (!list.some(s => s.endpoint === ev.sub.endpoint)) list.push(ev.sub);
+      }
+      return;
+    }
     if (customerOnly && ev.no !== selectedNo) return;
     const i = orders.findIndex(o => o.no === ev.no);
     if (ev.status === "removed") { if (i >= 0) orders.splice(i, 1); return; }
@@ -417,7 +434,7 @@ main.wrap.only-customer { grid-template-columns: minmax(0, 1fr); max-width: 460p
       const tm = document.createElement("span"); tm.textContent = fmtTime(o.createdAt);
       sub.append(st, tm); meta.append(no, sub);
       const acts = document.createElement("div"); acts.className = "acts";
-      if (o.status === "preparing") acts.append(btn("btn btn-ready", "جاهز، رنّ الجوال", () => publish({ no: o.no, status: "ready" }).catch(() => flash(errMsg))));
+      if (o.status === "preparing") acts.append(btn("btn btn-ready", "جاهز، رنّ الجوال", () => publish({ no: o.no, status: "ready" }).then(() => sendPush(o.no)).catch(() => flash(errMsg))));
       else acts.append(btn("btn btn-ghost", "سُلّم", () => publish({ no: o.no, status: "done" }).catch(() => flash(errMsg))));
       acts.append(iconBtn(ICON_QR, `عرض رمز QR للطلب ${o.no}`, () => showQR(o.no)));
       if (mode !== "cashier") acts.append(iconBtn(ICON_PHONE, `عرض بيجر الطلب ${o.no}`, () => { selectedNo = o.no; renderAll(); }));
@@ -432,18 +449,85 @@ main.wrap.only-customer { grid-template-columns: minmax(0, 1fr); max-width: 460p
     for (const o of orders.filter(o => o.status === "done")) { try { await publish({ no: o.no, status: "removed" }); } catch (e) { flash(errMsg); break; } }
   });
 
+  // ---------- push (cashier side) ----------
+  async function sendPush(no) {
+    const list = subs[no] || [];
+    if (!list.length) { flash(`طلب ${no}: العميل ما فعّل التنبيهات، فالجوال يرن بس إذا كانت الصفحة مفتوحة.`); return; }
+    let ok = 0;
+    for (const sub of list) {
+      try {
+        const r = await fetch("/api/push", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ sub, no, url: pagerUrl(no) }) });
+        const j = await r.json().catch(() => ({}));
+        if (j.ok) ok++;
+      } catch (e) {}
+    }
+    flash(ok ? "" : `طلب ${no}: ما قدرنا نرسل الإشعار للجوال. تأكد من الإنترنت.`);
+  }
+
+  // ---------- push (customer side) ----------
+  const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  const isStandalone = (window.matchMedia && matchMedia("(display-mode: standalone)").matches) || navigator.standalone === true;
+  let swReg = null;
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.register("/sw.js").then(r => { swReg = r; }).catch(() => {});
+  }
+  function b64ToBytes(s) {
+    const pad = "=".repeat((4 - s.length % 4) % 4);
+    const raw = atob((s + pad).replace(/-/g, "+").replace(/_/g, "/"));
+    return Uint8Array.from(raw, c => c.charCodeAt(0));
+  }
+  async function enablePush() {
+    if (!("serviceWorker" in navigator) || !("PushManager" in window) || !("Notification" in window)) {
+      return isIOS && !isStandalone ? "ios-install" : "unsupported";
+    }
+    let perm = Notification.permission;
+    if (perm === "default") perm = await Notification.requestPermission();
+    if (perm !== "granted") return "denied";
+    const reg = swReg || await navigator.serviceWorker.ready;
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToBytes(VAPID_PUBLIC_KEY) });
+    await publish({ type: "sub", no: selectedNo, sub: sub.toJSON() });
+    try { localStorage.setItem("pager-push-" + restaurant + "-" + selectedNo, "1"); } catch (e) {}
+    return "ok";
+  }
+  // Re-announce an existing subscription on reload so the cashier always has it.
+  if (customerOnly && "serviceWorker" in navigator && "Notification" in window && Notification.permission === "granted") {
+    navigator.serviceWorker.ready.then(r => r.pushManager.getSubscription()).then(sub => {
+      if (sub) {
+        publish({ type: "sub", no: selectedNo, sub: sub.toJSON() }).catch(() => {});
+        $("sound-banner").classList.add("on");
+        $("sound-text").textContent = "التنبيهات مفعّلة. بيوصلك إشعار حتى لو طلعت من المتصفح.";
+        $("enable-sound").textContent = "تفعيل صوت الصفحة";
+      }
+    }).catch(() => {});
+  }
+  if (customerOnly && isIOS && !isStandalone) {
+    $("sound-text").textContent = "للآيفون: اضغط زر المشاركة ثم «إضافة إلى الشاشة الرئيسية»، وافتح البيجر من الأيقونة وفعّل التنبيهات.";
+  }
+
   // ---------- customer pager ----------
   let audioCtx = null, alarmTimer = null, wakeLock = null, soundOn = false;
   const lastStatus = {}, silenced = {};
 
-  $("enable-sound").addEventListener("click", () => {
+  $("enable-sound").addEventListener("click", async () => {
     try { audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)(); audioCtx.resume(); soundOn = true; beep(); }
     catch (e) { soundOn = false; }
-    if ("Notification" in window && Notification.permission === "default") { try { Notification.requestPermission(); } catch (e) {} }
     requestWake();
-    $("sound-banner").classList.add("on");
-    $("sound-text").textContent = soundOn ? "الصوت مفعّل. بيرن الجوال لما يجهز طلبك." : "المتصفح ما سمح بالصوت. الشاشة بتومض لما يجهز طلبك.";
-    $("enable-sound").hidden = true;
+    $("enable-sound").disabled = true;
+    let res = "unsupported";
+    try { res = selectedNo ? await enablePush() : "unsupported"; } catch (e) { res = "error"; }
+    $("enable-sound").disabled = false;
+    const msgs = {
+      "ok": "التنبيهات مفعّلة. بيوصلك إشعار بصوت واهتزاز حتى لو طلعت من المتصفح.",
+      "denied": "رفضت الإشعارات، فالجوال يرن بس والصفحة مفتوحة. تقدر تسمح بها من إعدادات المتصفح للموقع.",
+      "ios-install": "للآيفون: اضغط زر المشاركة ثم «إضافة إلى الشاشة الرئيسية»، وافتح البيجر من الأيقونة وفعّل التنبيهات من هناك.",
+      "unsupported": soundOn ? "المتصفح هذا ما يدعم الإشعارات. الصوت مفعّل والصفحة مفتوحة." : "المتصفح ما سمح بالصوت. الشاشة بتومض لما يجهز طلبك.",
+      "error": "ما قدرنا نفعّل الإشعارات. تأكد من الإنترنت وحاول مرة ثانية."
+    };
+    $("sound-text").textContent = msgs[res];
+    if (res === "ok") { $("sound-banner").classList.add("on"); $("enable-sound").hidden = true; }
+    else if (res === "error") { /* keep the button for a retry */ }
+    else { $("enable-sound").hidden = true; $("sound-banner").classList.toggle("on", soundOn); }
   });
   async function requestWake() {
     try { if ("wakeLock" in navigator && !wakeLock) { wakeLock = await navigator.wakeLock.request("screen"); wakeLock.addEventListener("release", () => { wakeLock = null; }); } } catch (e) {}
